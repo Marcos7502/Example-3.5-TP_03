@@ -3,6 +3,9 @@
 #include "mbed.h"
 #include "arm_book_lib.h"
 
+// #define DIGITAL
+#define BUS
+// #define PORT
 //=====[Defines]===============================================================
 
 #define NUMBER_OF_KEYS                           4
@@ -15,6 +18,7 @@
 
 //=====[Declaration and initialization of public global objects]===============
 
+#ifdef DIGITAL
 DigitalIn enterButton(BUTTON1);
 DigitalIn alarmTestButton(D2);
 DigitalIn aButton(D4);
@@ -28,6 +32,19 @@ DigitalOut incorrectCodeLed(LED3);
 DigitalOut systemBlockedLed(LED2);
 
 DigitalInOut sirenPin(PE_10);
+#endif
+#ifdef BUS
+DigitalIn enterButton(BUTTON1);
+DigitalIn alarmTestButton(D2);
+BusIn userButtons(D4, D5, D6, D7); // Mask
+
+DigitalIn mq2(PE_12);
+DigitalOut alarmLed(LED1);
+DigitalOut incorrectCodeLed(LED3);
+DigitalOut systemBlockedLed(LED2);
+DigitalInOut sirenPin(PE_10);
+
+#endif
 
 UnbufferedSerial uartUsb(USBTX, USBRX, 115200);
 
@@ -88,10 +105,15 @@ int main()
 void inputsInit()
 {
     alarmTestButton.mode(PullDown);
-    aButton.mode(PullDown);
-    bButton.mode(PullDown);
-    cButton.mode(PullDown);
-    dButton.mode(PullDown);
+    #ifdef DIGITAL
+        aButton.mode(PullDown);
+        bButton.mode(PullDown);
+        cButton.mode(PullDown);
+        dButton.mode(PullDown);
+    #endif
+    #ifdef BUS
+        userButtons.mode(PullDown);  
+    #endif
     sirenPin.mode(OpenDrain);
     sirenPin.input();
 }
@@ -114,12 +136,12 @@ void alarmActivationUpdate()
         lm35SampleIndex = 0;
     }
     
-       lm35ReadingsSum = 0.0;
+    lm35ReadingsSum = 0.0;
     for (i = 0; i < NUMBER_OF_AVG_SAMPLES; i++) {
         lm35ReadingsSum = lm35ReadingsSum + lm35ReadingsArray[i];
     }
     lm35ReadingsAverage = lm35ReadingsSum / NUMBER_OF_AVG_SAMPLES;
-       lm35TempC = analogReadingScaledWithTheLM35Formula ( lm35ReadingsAverage );    
+    lm35TempC = analogReadingScaledWithTheLM35Formula ( lm35ReadingsAverage );    
     
     if ( lm35TempC > OVER_TEMP_LEVEL ) {
         overTempDetector = ON;
@@ -131,7 +153,7 @@ void alarmActivationUpdate()
         gasDetectorState = ON;
         alarmState = ON;
     }
-    if( overTempDetector ) {
+    if( potentiometer.read()>0.5 ) {
         overTempDetectorState = ON;
         alarmState = ON;
     }
@@ -170,16 +192,49 @@ void alarmActivationUpdate()
 }
 
 void alarmDeactivationUpdate()
-{
+{   
+    #ifdef BUS
+        if (numberOfIncorrectCodes < 5) {
+
+            if (!(userButtons.read() ^ userButtons.mask()) && !enterButton) {
+                incorrectCodeLed = OFF;
+            }
+
+            if ( enterButton && !incorrectCodeLed && alarmState ) {
+                    
+                    buttonsPressed[0] = userButtons[0] ;
+                    buttonsPressed[1] = userButtons[1] ;
+                    buttonsPressed[2] = userButtons[2] ;
+                    buttonsPressed[3] = userButtons[3] ;
+                    for (int i = 0; i < 4; ++i) {
+                        printf("Botón %d: %d\r\n",i, userButtons[i]);
+                    }
+                    
+                if ( areEqual() ) {
+                    alarmState = OFF;
+                    numberOfIncorrectCodes = 0;
+                } else {
+                    incorrectCodeLed = ON;
+                    numberOfIncorrectCodes++;
+                }
+            }
+        } else {
+        systemBlockedLed = ON;
+        }
+    #endif 
+    #ifdef DIGITAL
     if ( numberOfIncorrectCodes < 5 ) {
+               
         if ( aButton && bButton && cButton && dButton && !enterButton ) {
             incorrectCodeLed = OFF;
         }
         if ( enterButton && !incorrectCodeLed && alarmState ) {
+
             buttonsPressed[0] = aButton;
             buttonsPressed[1] = bButton;
             buttonsPressed[2] = cButton;
             buttonsPressed[3] = dButton;
+           
             if ( areEqual() ) {
                 alarmState = OFF;
                 numberOfIncorrectCodes = 0;
@@ -188,9 +243,11 @@ void alarmDeactivationUpdate()
                 numberOfIncorrectCodes++;
             }
         }
+        
     } else {
         systemBlockedLed = ON;
     }
+    #endif
 }
 
 void uartTask()
